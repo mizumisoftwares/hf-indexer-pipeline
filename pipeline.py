@@ -6,11 +6,12 @@ import shutil
 from huggingface_hub import hf_hub_download, HfApi, login
 
 HF_TOKEN = os.getenv("HF_TOKEN")
-DEST_REPO = os.getenv("DEST_REPO")
+DEST_REPO = os.getenv("DEST_REPO", "sarveshmgkvp/extracted-foab-parquet")
 START_PART = int(os.getenv("START_PART", "1"))
 END_PART = int(os.getenv("END_PART", "1"))
 
-SOURCE_REPO = "darrifylive/Father-of-All-Breache-FOAB"
+# Updated to your actual bucket dataset on Hugging Face
+SOURCE_REPO = "sarveshmgkvp/Father-of-All-Breache-FOAB-bucket"
 
 login(token=HF_TOKEN)
 api = HfApi()
@@ -37,7 +38,7 @@ for part in range(START_PART, END_PART + 1):
     
     try:
         # A. Download Header Part 1
-        print(f"Downloading Archive Header: {part1_filename}")
+        print(f"Downloading Archive Header from {SOURCE_REPO}: {part1_filename}")
         hf_hub_download(
             repo_id=SOURCE_REPO,
             filename=part1_filename,
@@ -63,24 +64,22 @@ for part in range(START_PART, END_PART + 1):
             check=False
         )
         
-        # C. Recursively collect ALL extracted files (handling subfolders)
+        # C. Recursively collect ALL extracted files across all subfolders
         extracted_files = []
         for root, _, files in os.walk(extract_dir):
             for file in files:
                 extracted_files.append(os.path.join(root, file))
         
-        print(f"Found {len(extracted_files)} extracted file(s) across all directories.")
+        print(f"Found {len(extracted_files)} extracted file(s).")
         
         # D. Convert each file to Parquet & aggregate into DuckDB
         con = duckdb.connect(f"{output_dir}/index_part_{part}.duckdb")
-        
-        # Initialize DuckDB table
         table_created = False
         
         for idx, filepath in enumerate(extracted_files):
             file_name = os.path.basename(filepath)
             
-            # Skip non-data or hidden files
+            # Skip hidden files or previous output files
             if file_name.startswith('.') or file_name.endswith(('.duckdb', '.parquet')):
                 continue
                 
@@ -112,11 +111,11 @@ for part in range(START_PART, END_PART + 1):
             except Exception as err:
                 print(f"    -> [Warning] Failed to parse {file_name}: {err}")
 
-        # Build Index if table exists
+        # Build Index if data exists
         if table_created:
             try:
                 con.execute("CREATE INDEX idx_col0 ON email_records(column0);")
-                print("  [Indexed]: ART Index created on primary column.")
+                print("  [Indexed]: Index created on primary column.")
             except Exception as idx_err:
                 print(f"  [Index Notice]: {idx_err}")
         
@@ -136,7 +135,7 @@ for part in range(START_PART, END_PART + 1):
             )
             print(f"Successfully uploaded batch {part} to Hugging Face!")
         else:
-            print("No valid files were generated to upload.")
+            print("No valid output files generated to upload.")
 
     except Exception as e:
         print(f"Error processing Part {part}: {e}")
