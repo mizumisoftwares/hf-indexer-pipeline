@@ -5,8 +5,6 @@ import duckdb
 import shutil
 from huggingface_hub import hf_hub_download, HfApi, login
 
-HF_TOKEN="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"
-
 HF_TOKEN = os.getenv("HF_TOKEN")
 DEST_REPO = os.getenv("DEST_REPO", "sarveshmgkvp/extracted-foab-parquet")
 START_PART = int(os.getenv("START_PART", "1"))
