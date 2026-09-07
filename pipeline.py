@@ -8,12 +8,13 @@ from huggingface_hub import hf_hub_download, HfApi, login
 HF_TOKEN = os.getenv("HF_TOKEN")
 DEST_REPO = os.getenv("DEST_REPO", "sarveshmgkvp/extracted-foab-parquet")
 START_PART = int(os.getenv("START_PART", "1"))
-END_PART = int(os.getenv("END_PART", "5"))
+END_PART = int(os.getenv("END_PART", "1"))
 
-SOURCE_REPO = "sarveshmgkvp/Father-of-All-Breache-FOAB-bucket"
+# Corrected typo: added 's' to Breaches
+SOURCE_REPO = "sarveshmgkvp/Father-of-All-Breaches-FOAB-bucket"
 
 if not HF_TOKEN:
-    raise ValueError("HF_TOKEN secret is missing! Set it in GitHub Repository Settings -> Secrets.")
+    raise ValueError("HF_TOKEN environment variable is not set!")
 
 login(token=HF_TOKEN)
 api = HfApi()
@@ -33,16 +34,17 @@ os.makedirs(output_dir, exist_ok=True)
 part1_filename = "xpolite-emaildb.part-2-.part001.rar"
 
 try:
-    # 1. Download Header Part
+    # 1. Download Header Part with explicit auth token
     print(f"Downloading Archive Header: {part1_filename}")
     hf_hub_download(
         repo_id=SOURCE_REPO,
         filename=part1_filename,
         repo_type="dataset",
-        local_dir=part_dir
+        local_dir=part_dir,
+        token=HF_TOKEN
     )
     
-    # 2. Download requested parts
+    # 2. Download target parts
     for part in range(START_PART, END_PART + 1):
         target_filename = f"xpolite-emaildb.part-2-.part{part:03d}.rar"
         if part != 1:
@@ -52,12 +54,13 @@ try:
                     repo_id=SOURCE_REPO,
                     filename=target_filename,
                     repo_type="dataset",
-                    local_dir=part_dir
+                    local_dir=part_dir,
+                    token=HF_TOKEN
                 )
             except Exception as dl_err:
                 print(f"Notice: Could not download {target_filename}: {dl_err}")
 
-    # 3. Extract (allow non-zero exit code for partial volumes)
+    # 3. Extract RAR volumes using 7-Zip
     part1_path = os.path.join(part_dir, part1_filename)
     print("\nExtracting archive volumes using 7-Zip...")
     cmd_res = subprocess.run(
@@ -65,9 +68,9 @@ try:
         capture_output=True,
         text=True
     )
-    print(f"7-Zip Output Summary: {cmd_res.stdout[-300:] if cmd_res.stdout else 'Done'}")
+    print(f"7-Zip Execution Finished.")
 
-    # 4. Gather extracted files recursively
+    # 4. Recursively collect all extracted files
     extracted_files = []
     for root, _, files in os.walk(extract_dir):
         for file in files:
@@ -75,10 +78,7 @@ try:
 
     print(f"\nFound {len(extracted_files)} extracted file(s).")
 
-    # 5. Process files into Parquet
-    con = duckdb.connect(f"{output_dir}/index_batch_{START_PART}_{END_PART}.duckdb")
-    table_created = False
-
+    # 5. Convert to Parquet
     for idx, filepath in enumerate(extracted_files):
         file_name = os.path.basename(filepath)
         if file_name.startswith('.') or file_name.endswith(('.duckdb', '.parquet')):
@@ -88,7 +88,6 @@ try:
         print(f"  [Processing]: {file_name}")
         
         try:
-            # Safe DuckDB CSV reader configuration
             query = f"""
                 COPY (
                     SELECT * FROM read_csv('{filepath}', 
@@ -99,14 +98,12 @@ try:
                 ) TO '{pq_name}' (FORMAT PARQUET, COMPRESSION 'SNAPPY');
             """
             duckdb.execute(query)
-            print(f"    -> Generated: {os.path.basename(pq_name)}")
+            print(f"    -> Successfully created Parquet: {os.path.basename(pq_name)}")
             
         except Exception as err:
-            print(f"    -> [Warning] Error parsing {file_name}: {err}")
+            print(f"    -> [Warning] Could not parse {file_name}: {err}")
 
-    con.close()
-
-    # 6. Upload results
+    # 6. Upload output directory to Hugging Face
     output_files = glob.glob(f"{output_dir}/*")
     print(f"\nUploading {len(output_files)} parsed file(s) to Hugging Face...")
     
@@ -118,7 +115,7 @@ try:
             path_in_repo=f"batch_{START_PART}_to_{END_PART}",
             multi_commits=True
         )
-        print("Upload successful!")
+        print("Upload finished successfully!")
     else:
         print("No output files generated to upload.")
 
