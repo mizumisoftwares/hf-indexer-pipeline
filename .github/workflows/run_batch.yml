@@ -1,52 +1,35 @@
-name: Stream Process 400GB Dataset
+name: Process Archive Part
 
 on:
   workflow_dispatch:
     inputs:
-      start_part:
-        description: 'Start RAR Part Number (e.g. 1)'
+      target_filename:
+        description: 'Full filename to process (e.g., xpolite-emaildb.part-2-.part005.rar)'
         required: true
-        default: '1'
-      end_part:
-        description: 'End RAR Part Number (e.g. 2)'
-        required: true
-        default: '2'
+        type: string
 
 jobs:
-  process-and-upload:
+  process:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-    - name: Free Disk Space
-      run: |
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /usr/local/lib/android
-        sudo rm -rf /opt/ghc
-        sudo rm -rf /usr/local/share/powershell
-        df -h
+      - name: Install dependencies and 7-Zip
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y p7zip-full
+          pip install huggingface_hub duckdb
 
-    - name: Install System Dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y p7zip-full
-
-    - name: Install Python Libraries
-      run: |
-        pip install huggingface_hub duckdb pandas pyarrow
-
-    - name: Run Pipeline Script
-      env:
-        HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        DEST_REPO: ${{ secrets.DEST_REPO }}
-        START_PART: ${{ github.event.inputs.start_part }}
-        END_PART: ${{ github.event.inputs.end_part }}
-      run: |
-        python pipeline.py
+      - name: Run Processing Script
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          DEST_REPO: ${{ secrets.DEST_REPO }}
+        # Pass the input directly into the script prompt
+        run: |
+          echo "${{ inputs.target_filename }}" | python process_script.py
