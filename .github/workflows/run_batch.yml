@@ -6,7 +6,7 @@ on:
       hf_target_repo:
         description: 'Hugging Face Target Dataset Repo (e.g. username/dataset)'
         required: true
-        default: 'sarveshmgkvp/converted-parquet-dataset'
+        default: ''
 
 jobs:
   process-and-upload:
