@@ -8,7 +8,7 @@ from huggingface_hub import hf_hub_download, HfApi, login
 HF_TOKEN = os.getenv("HF_TOKEN")
 DEST_REPO = os.getenv("DEST_REPO")
 START_PART = int(os.getenv("START_PART", "1"))
-END_PART = int(os.getenv("END_PART", "2"))
+END_PART = int(os.getenv("END_PART", "1"))
 
 SOURCE_REPO = "darrifylive/Father-of-All-Breache-FOAB"
 
@@ -19,7 +19,6 @@ api.create_repo(repo_id=DEST_REPO, repo_type="dataset", private=True, exist_ok=T
 
 print(f"=== Starting Processing Pipeline for Parts {START_PART} through {END_PART} ===")
 
-# Always ensure part 001 is available as the header index
 part1_filename = "xpolite-emaildb.part-2-.part001.rar"
 
 for part in range(START_PART, END_PART + 1):
@@ -37,7 +36,7 @@ for part in range(START_PART, END_PART + 1):
     target_filename = f"xpolite-emaildb.part-2-.part{part:03d}.rar"
     
     try:
-        # A. Always download part001.rar (Header)
+        # A. Download Header Part 1
         print(f"Downloading Archive Header: {part1_filename}")
         hf_hub_download(
             repo_id=SOURCE_REPO,
@@ -46,7 +45,7 @@ for part in range(START_PART, END_PART + 1):
             local_dir=part_dir
         )
         
-        # Download target part if different from part001
+        # Download target part if different
         if part != 1:
             print(f"Downloading Target Part: {target_filename}")
             hf_hub_download(
@@ -56,61 +55,78 @@ for part in range(START_PART, END_PART + 1):
                 local_dir=part_dir
             )
         
-        # B. Unrar starting from part001
+        # B. Extract starting from Part 1
         part1_path = os.path.join(part_dir, part1_filename)
         print("Extracting volume using 7zip...")
-        extract_proc = subprocess.run(
+        subprocess.run(
             ["7z", "x", part1_path, f"-o{extract_dir}", "-y"],
-            capture_output=True,
-            text=True
+            check=False
         )
-        print(extract_proc.stdout[:500]) # Log extraction output
         
-        # C. Convert extracted files to Parquet
-        print("Converting extracted files to compressed Parquet format...")
-        extracted_files = [
-            f for f in glob.glob(f"{extract_dir}/**/*", recursive=True)
-            if os.path.isfile(f)
-        ]
+        # C. Recursively collect ALL extracted files (handling subfolders)
+        extracted_files = []
+        for root, _, files in os.walk(extract_dir):
+            for file in files:
+                extracted_files.append(os.path.join(root, file))
         
-        print(f"Found {len(extracted_files)} extracted files to convert.")
+        print(f"Found {len(extracted_files)} extracted file(s) across all directories.")
         
-        for filepath in extracted_files:
-            base_name = os.path.basename(filepath)
-            pq_name = f"{output_dir}/{base_name}.parquet"
+        # D. Convert each file to Parquet & aggregate into DuckDB
+        con = duckdb.connect(f"{output_dir}/index_part_{part}.duckdb")
+        
+        # Initialize DuckDB table
+        table_created = False
+        
+        for idx, filepath in enumerate(extracted_files):
+            file_name = os.path.basename(filepath)
+            
+            # Skip non-data or hidden files
+            if file_name.startswith('.') or file_name.endswith(('.duckdb', '.parquet')):
+                continue
+                
+            pq_name = f"{output_dir}/file_{idx}_{file_name}.parquet"
+            print(f"  [Processing]: {file_name}")
             
             try:
-                con = duckdb.connect()
-                con.execute(f"""
+                # 1. Convert to Parquet
+                temp_con = duckdb.connect()
+                temp_con.execute(f"""
                     COPY (SELECT * FROM read_csv_auto('{filepath}', ignore_errors=true, all_varchar=true))
                     TO '{pq_name}' (FORMAT PARQUET, COMPRESSION 'SNAPPY');
                 """)
-                con.close()
-                print(f"  [Converted]: {base_name} -> {base_name}.parquet")
+                temp_con.close()
+                print(f"    -> Generated Parquet: {os.path.basename(pq_name)}")
+                
+                # 2. Append to DuckDB index table
+                if not table_created:
+                    con.execute(f"""
+                        CREATE TABLE email_records AS 
+                        SELECT * FROM read_csv_auto('{filepath}', ignore_errors=true, all_varchar=true);
+                    """)
+                    table_created = True
+                else:
+                    con.execute(f"""
+                        INSERT INTO email_records 
+                        SELECT * FROM read_csv_auto('{filepath}', ignore_errors=true, all_varchar=true);
+                    """)
             except Exception as err:
-                print(f"  [Warning]: Skipped {base_name}: {err}")
+                print(f"    -> [Warning] Failed to parse {file_name}: {err}")
 
-        # D. Build DuckDB Index
-        print("Building DuckDB ART Search Index...")
-        db_path = f"{output_dir}/index_part_{part}.duckdb"
-        con = duckdb.connect(db_path)
+        # Build Index if table exists
+        if table_created:
+            try:
+                con.execute("CREATE INDEX idx_col0 ON email_records(column0);")
+                print("  [Indexed]: ART Index created on primary column.")
+            except Exception as idx_err:
+                print(f"  [Index Notice]: {idx_err}")
         
-        con.execute(f"""
-            CREATE TABLE email_records AS 
-            SELECT * FROM read_csv_auto('{extract_dir}/*', ignore_errors=true, all_varchar=true);
-        """)
-        
-        try:
-            con.execute("CREATE INDEX idx_col0 ON email_records(column0);")
-            print("  [Indexed]: ART Index created on primary search column.")
-        except Exception as idx_err:
-            print(f"  [Index Notice]: {idx_err}")
         con.close()
 
-        # E. Upload to Hugging Face
-        upload_files = glob.glob(f"{output_dir}/*")
-        if upload_files:
-            print(f"Uploading {len(upload_files)} files to Hugging Face...")
+        # E. Upload outputs to Hugging Face
+        output_files = glob.glob(f"{output_dir}/*")
+        print(f"Total files ready for upload in batch {part}: {len(output_files)}")
+        
+        if output_files:
             api.upload_folder(
                 folder_path=output_dir,
                 repo_id=DEST_REPO,
@@ -118,12 +134,12 @@ for part in range(START_PART, END_PART + 1):
                 path_in_repo=f"data_batch_{part}",
                 multi_commits=True
             )
-            print(f"Successfully processed, indexed, and uploaded Part {part}!")
+            print(f"Successfully uploaded batch {part} to Hugging Face!")
         else:
-            print(f"No files generated in {output_dir} to upload.")
+            print("No valid files were generated to upload.")
 
     except Exception as e:
-        print(f"Error encountered while processing Part {part}: {e}")
+        print(f"Error processing Part {part}: {e}")
 
     finally:
         print("Cleaning up local disk space...")
@@ -131,4 +147,4 @@ for part in range(START_PART, END_PART + 1):
         shutil.rmtree(extract_dir, ignore_errors=True)
         shutil.rmtree(output_dir, ignore_errors=True)
 
-print("\n=== Workflow Batch Execution Complete! ===")
+print("\n=== Pipeline Execution Finished ===")
