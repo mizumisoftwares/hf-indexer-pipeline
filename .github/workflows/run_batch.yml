@@ -8,9 +8,9 @@ on:
         required: true
         default: '1'
       end_part:
-        description: 'End RAR Part Number (e.g. 5)'
+        description: 'End RAR Part Number (e.g. 2)'
         required: true
-        default: '5'
+        default: '2'
 
 jobs:
   process-and-upload:
@@ -20,19 +20,18 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
 
-    - name: Maximize Runner Disk Space
-      uses: easimon/maximize-build-space@v10
-      with:
-        remove-dotnet: 'true'
-        remove-android: 'true'
-        remove-haskell: 'true'
-        remove-codeql: 'true'
-        root-reserve-mb: 10240
-
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
+
+    - name: Free Disk Space
+      run: |
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /usr/local/share/powershell
+        df -h
 
     - name: Install System Dependencies
       run: |
