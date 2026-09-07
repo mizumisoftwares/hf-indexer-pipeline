@@ -1,35 +1,55 @@
-name: Process Archive Part
+name: RAR Extractor and HF Parquet Uploader
 
 on:
   workflow_dispatch:
     inputs:
-      target_filename:
-        description: 'Full filename to process (e.g., xpolite-emaildb.part-2-.part005.rar)'
+      hf_target_repo:
+        description: 'Hugging Face Target Dataset Repo (e.g. username/dataset)'
         required: true
-        type: string
+        default: 'sarveshmgkvp/converted-parquet-dataset'
 
 jobs:
-  process:
+  process-and-upload:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
+          cache: 'pip'
 
-      - name: Install dependencies and 7-Zip
+      - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y p7zip-full
-          pip install huggingface_hub duckdb
+          sudo apt-get install -y unrar p7zip-full
 
-      - name: Run Processing Script
+      - name: Install Python Dependencies
+        run: |
+          pip install polars pandas pyarrow huggingface_hub
+
+      - name: Create Input Workspace
+        run: |
+          mkdir -p rar_inputs
+
+      # NOTE: Place your script/step to fetch your RAR parts into `rar_inputs/`
+      # e.g., downloading from a source URL, Hugging Face raw storage, or GitHub release assets.
+      - name: Fetch RAR Parts (Example Download Step)
+        run: |
+          echo "Place download logic here (e.g. wget / hf_hub_download for rar parts)"
+          # hf_hub_download or wget commands targeting your uploaded parts...
+
+      - name: Run Extraction & Parquet Conversion Script
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          DEST_REPO: ${{ secrets.DEST_REPO }}
-        # Pass the input directly into the script prompt
+          TARGET_REPO: ${{ github.event.inputs.hf_target_repo }}
         run: |
-          echo "${{ inputs.target_filename }}" | python process_script.py
+          python process_and_upload.py
+
+      - name: Cleanup Workspace
+        if: always()
+        run: |
+          rm -rf rar_inputs extracted_data parquet_output
