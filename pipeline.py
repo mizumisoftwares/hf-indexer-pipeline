@@ -11,7 +11,7 @@ START_PART = int(os.getenv("START_PART", "1"))
 END_PART = int(os.getenv("END_PART", "1"))
 
 # Corrected typo: added 's' to Breaches
-SOURCE_REPO = "sarveshmgkvp/Father-of-All-Breaches-FOAB-bucket"
+SOURCE_REPO = "darrifylive/Father-of-All-Breache-FOAB"
 
 if not HF_TOKEN:
     raise ValueError("HF_TOKEN environment variable is not set!")
