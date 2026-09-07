@@ -1,0 +1,53 @@
+name: Stream Process 400GB Dataset
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_part:
+        description: 'Start RAR Part Number (e.g. 1)'
+        required: true
+        default: '1'
+      end_part:
+        description: 'End RAR Part Number (e.g. 5)'
+        required: true
+        default: '5'
+
+jobs:
+  process-and-upload:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Maximize Runner Disk Space
+      uses: easimon/maximize-build-space@v10
+      with:
+        remove-dotnet: 'true'
+        remove-android: 'true'
+        remove-haskell: 'true'
+        remove-codeql: 'true'
+        root-reserve-mb: 10240
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install System Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y p7zip-full
+
+    - name: Install Python Libraries
+      run: |
+        pip install huggingface_hub duckdb pandas pyarrow
+
+    - name: Run Pipeline Script
+      env:
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        DEST_REPO: ${{ secrets.DEST_REPO }}
+        START_PART: ${{ github.event.inputs.start_part }}
+        END_PART: ${{ github.event.inputs.end_part }}
+      run: |
+        python pipeline.py
